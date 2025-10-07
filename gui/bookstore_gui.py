@@ -6,6 +6,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.animation as animation
+import networkx as nx
 import sys
 import os
 
@@ -196,21 +197,53 @@ class BookstoreGUI:
         self.analytics_frame = analytics_frame
     
     def create_ontology_tab(self):
-        """Create the ontology inspection tab"""
+        """Create the ontology inspection tab with diagram visualization"""
         onto_frame = ttk.Frame(self.notebook)
         self.notebook.add(onto_frame, text="Ontology")
         
-        # Ontology information display
-        info_frame = tk.LabelFrame(onto_frame, text="Ontology Information", font=('Arial', 12, 'bold'))
-        info_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        # Control buttons frame at the top
+        buttons_frame = tk.Frame(onto_frame, bg='#ecf0f1', height=50)
+        buttons_frame.pack(fill='x', padx=10, pady=5)
+        buttons_frame.pack_propagate(False)
+        
+        # Refresh button
+        refresh_btn = tk.Button(buttons_frame, text="Refresh Ontology", 
+                               command=self.refresh_ontology, bg='#3498db', fg='white',
+                               font=('Arial', 10, 'bold'), padx=20)
+        refresh_btn.pack(side='left', padx=5, pady=10)
+        
+        # View toggle button
+        self.diagram_view = tk.StringVar(value="structure")
+        view_btn = tk.Button(buttons_frame, text="Toggle View (Structure/Instances)", 
+                            command=self.toggle_ontology_view, bg='#9b59b6', fg='white',
+                            font=('Arial', 10, 'bold'), padx=20)
+        view_btn.pack(side='left', padx=5, pady=10)
+        
+        # Create horizontal paned window for splitting diagram and text
+        onto_paned = tk.PanedWindow(onto_frame, orient=tk.HORIZONTAL)
+        onto_paned.pack(fill='both', expand=True, padx=10, pady=(0, 5))
+        
+        # Left side - Ontology diagram
+        diagram_frame = tk.LabelFrame(onto_paned, text="Ontology Diagram", font=('Arial', 12, 'bold'))
+        onto_paned.add(diagram_frame, width=600)
+        
+        # Create matplotlib figure for ontology diagram
+        self.onto_fig, self.onto_ax = plt.subplots(figsize=(8, 6))
+        self.onto_fig.suptitle('Bookstore Ontology Structure', fontsize=14, fontweight='bold')
+        
+        # Canvas for ontology diagram
+        self.onto_canvas = FigureCanvasTkAgg(self.onto_fig, diagram_frame)
+        self.onto_canvas.get_tk_widget().pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Right side - Ontology information display
+        info_frame = tk.LabelFrame(onto_paned, text="Ontology Details", font=('Arial', 12, 'bold'))
+        onto_paned.add(info_frame, width=400)
         
         self.ontology_text = scrolledtext.ScrolledText(info_frame, height=20, font=('Consolas', 9))
         self.ontology_text.pack(fill='both', expand=True, padx=5, pady=5)
         
-        # Refresh button
-        refresh_btn = tk.Button(onto_frame, text="Refresh Ontology", 
-                               command=self.refresh_ontology, bg='#3498db', fg='white')
-        refresh_btn.pack(pady=5)
+        # Initialize diagram
+        self.create_ontology_diagram()
     
     def create_messages_tab(self):
         """Create the message bus monitoring tab"""
@@ -455,7 +488,7 @@ class BookstoreGUI:
         self.canvas.draw()
     
     def refresh_ontology(self):
-        """Refresh the ontology display"""
+        """Refresh the ontology display and diagram"""
         self.ontology_text.delete(1.0, tk.END)
         
         ontology_info = []
@@ -476,8 +509,185 @@ class BookstoreGUI:
         ontology_info.append(f"Total Employees: {len(list(Employee.instances()))}")
         ontology_info.append(f"Total Orders: {len(list(Order.instances()))}")
         
+        # Add relationship information
+        ontology_info.append("")
+        ontology_info.append("Ontology Relationships:")
+        ontology_info.append("Classes:")
+        ontology_info.append("  - Book (hasAuthor -> Author, hasGenre -> Genre)")
+        ontology_info.append("  - Customer (purchases -> Book, creates -> Order)")
+        ontology_info.append("  - Employee (fulfills -> Order)")
+        ontology_info.append("  - Order (timestamp)")
+        ontology_info.append("  - Author (linked from Book)")
+        ontology_info.append("  - Genre (linked from Book)")
+        
         # Display in text widget
         self.ontology_text.insert(tk.END, "\n".join(ontology_info))
+        
+        # Update diagram
+        self.create_ontology_diagram()
+    
+    def create_ontology_diagram(self):
+        """Create and display the ontology structure diagram"""
+        self.onto_ax.clear()
+        
+        # Create a directed graph
+        G = nx.DiGraph()
+        
+        if self.diagram_view.get() == "structure":
+            self._create_structure_diagram(G)
+        else:
+            self._create_instances_diagram(G)
+    
+    def _create_structure_diagram(self, G):
+        """Create ontology structure diagram showing classes and relationships"""
+        # Define ontology classes
+        classes = ['Book', 'Customer', 'Employee', 'Order', 'Author', 'Genre', 'Inventory']
+        
+        # Add nodes for classes
+        for cls in classes:
+            G.add_node(cls, node_type='class')
+        
+        # Add relationships (edges)
+        relationships = [
+            ('Book', 'Author', 'hasAuthor'),
+            ('Book', 'Genre', 'hasGenre'),
+            ('Customer', 'Book', 'purchases'),
+            ('Customer', 'Order', 'creates'),
+            ('Employee', 'Order', 'fulfills'),
+            ('Inventory', 'Book', 'contains')
+        ]
+        
+        for source, target, relation in relationships:
+            G.add_edge(source, target, label=relation)
+        
+        # Create layout
+        pos = nx.spring_layout(G, k=3, iterations=50)
+        
+        # Draw nodes
+        node_colors = ['lightblue' if node in ['Book', 'Customer', 'Employee'] 
+                      else 'lightgreen' if node in ['Author', 'Genre'] 
+                      else 'lightyellow' for node in G.nodes()]
+        
+        nx.draw_networkx_nodes(G, pos, node_color=node_colors, 
+                              node_size=2000, alpha=0.9, ax=self.onto_ax)
+        
+        # Draw edges
+        nx.draw_networkx_edges(G, pos, edge_color='gray', 
+                              arrows=True, arrowsize=20, 
+                              arrowstyle='->', ax=self.onto_ax)
+        
+        # Draw labels
+        nx.draw_networkx_labels(G, pos, font_size=10, font_weight='bold', ax=self.onto_ax)
+        
+        # Draw edge labels
+        edge_labels = nx.get_edge_attributes(G, 'label')
+        nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=8, ax=self.onto_ax)
+        
+        self.onto_ax.set_title("Ontology Class Structure", fontsize=12, fontweight='bold')
+        self.onto_ax.axis('off')
+        
+        # Add legend
+        legend_elements = [
+            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='lightblue', 
+                      markersize=10, label='Main Entities'),
+            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='lightgreen', 
+                      markersize=10, label='Attributes'),
+            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='lightyellow', 
+                      markersize=10, label='Supporting Classes')
+        ]
+        self.onto_ax.legend(handles=legend_elements, loc='upper right', fontsize=8)
+        
+        self.onto_canvas.draw()
+    
+    def _create_instances_diagram(self, G):
+        """Create diagram showing actual instances and their relationships"""
+        # Add instances if model exists
+        if not self.model:
+            self.onto_ax.text(0.5, 0.5, 'Start simulation to see instances', 
+                             transform=self.onto_ax.transAxes, ha='center', va='center',
+                             fontsize=14, bbox=dict(boxstyle="round,pad=0.3", facecolor="lightyellow"))
+            self.onto_ax.set_title("Ontology Instances (No Active Simulation)", fontsize=12)
+            self.onto_ax.axis('off')
+            self.onto_canvas.draw()
+            return
+        
+        # Get actual instances from the simulation
+        books = list(Book.instances())[:5]  # Show first 5 books
+        customers = list(Customer.instances())[:3]  # Show first 3 customers
+        employees = list(Employee.instances())  # Show all employees
+        orders = list(Order.instances())[:5]  # Show first 5 orders
+        
+        # Add nodes for instances
+        for i, book in enumerate(books):
+            name = book.hasName[0] if book.hasName else f'Book_{i}'
+            G.add_node(f"Book: {name[:15]}", node_type='book_instance')
+        
+        for i, customer in enumerate(customers):
+            name = customer.hasName[0] if customer.hasName else f'Customer_{i}'
+            G.add_node(f"Cust: {name}", node_type='customer_instance')
+        
+        for i, employee in enumerate(employees):
+            name = employee.hasName[0] if employee.hasName else f'Employee_{i}'
+            G.add_node(f"Emp: {name}", node_type='employee_instance')
+        
+        # Add purchase relationships
+        for customer in customers:
+            customer_name = f"Cust: {customer.hasName[0]}" if customer.hasName else f"Cust: Customer_{customers.index(customer)}"
+            if customer.purchases:
+                for book in customer.purchases[:2]:  # Show max 2 purchases per customer
+                    book_name = f"Book: {book.hasName[0][:15]}" if book.hasName else f"Book: {book}"
+                    if book_name in G.nodes():
+                        G.add_edge(customer_name, book_name, label='purchases')
+        
+        # Create layout
+        pos = nx.spring_layout(G, k=2, iterations=50)
+        
+        # Draw nodes with different colors for different types
+        node_colors = []
+        for node in G.nodes():
+            if 'Book:' in node:
+                node_colors.append('lightcoral')
+            elif 'Cust:' in node:
+                node_colors.append('lightblue')
+            elif 'Emp:' in node:
+                node_colors.append('lightgreen')
+            else:
+                node_colors.append('lightyellow')
+        
+        nx.draw_networkx_nodes(G, pos, node_color=node_colors, 
+                              node_size=1500, alpha=0.9, ax=self.onto_ax)
+        
+        # Draw edges
+        nx.draw_networkx_edges(G, pos, edge_color='gray', 
+                              arrows=True, arrowsize=15, 
+                              arrowstyle='->', ax=self.onto_ax)
+        
+        # Draw labels
+        nx.draw_networkx_labels(G, pos, font_size=8, font_weight='bold', ax=self.onto_ax)
+        
+        self.onto_ax.set_title("Ontology Instances and Relationships", fontsize=12, fontweight='bold')
+        self.onto_ax.axis('off')
+        
+        # Add legend
+        legend_elements = [
+            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='lightcoral', 
+                      markersize=10, label='Books'),
+            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='lightblue', 
+                      markersize=10, label='Customers'),
+            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='lightgreen', 
+                      markersize=10, label='Employees')
+        ]
+        self.onto_ax.legend(handles=legend_elements, loc='upper right', fontsize=8)
+        
+        self.onto_canvas.draw()
+    
+    def toggle_ontology_view(self):
+        """Toggle between structure and instances view"""
+        if self.diagram_view.get() == "structure":
+            self.diagram_view.set("instances")
+        else:
+            self.diagram_view.set("structure")
+        self.create_ontology_diagram()
     
     def clear_messages(self):
         """Clear the messages display"""
